@@ -16,9 +16,9 @@ const mockDonors = [
 ];
 
 let mockRequests = [
-  { id: 1, requester_id: 6, requester_name: 'Amit Sengupta (Demo Requester)', patient_name: 'Ramesh Sengupta (Post-Surgery)', hospital_name_manual: 'CityCare Multispecialty Hospital', blood_group: 'O+', component: 'Packed Red Blood Cells (PRBC)', units_needed: 2, units_fulfilled: 0, urgency: 'urgent', required_by: '2026-11-27T10:00:00', contact_phone: '+91-9876543215', delivery_address: 'Ward 4B, CityCare Hospital, Indiranagar', city: 'Bangalore', state: 'Karnataka', status: 'open', notes: 'Patient scheduled for bypass surgery tomorrow morning.', created_at: '2026-11-25T14:00:00' },
-  { id: 2, requester_id: 3, requester_name: 'Dr. Arvind Verma', patient_name: 'Trauma ICU Patient #1042', hospital_name_manual: 'CityCare Multispecialty Hospital', blood_group: 'O-', component: 'Whole Blood', units_needed: 3, units_fulfilled: 0, urgency: 'emergency', required_by: '2026-11-26T04:00:00', contact_phone: '+91-8023456780', delivery_address: 'ICU Resuscitation Bay 2', city: 'Bangalore', state: 'Karnataka', status: 'open', notes: 'Critical road traffic accident trauma case. Immediate availability required.', created_at: '2026-11-25T20:30:00' },
-  { id: 3, requester_id: 6, requester_name: 'Amit Sengupta (Demo Requester)', patient_name: 'Sunita M. (Dengue Care)', hospital_name_manual: 'St. Jude Apex Medical Center', blood_group: 'B+', component: 'Platelets', units_needed: 4, units_fulfilled: 4, urgency: 'standard', required_by: '2026-11-24T18:00:00', contact_phone: '+91-9876543215', delivery_address: 'Floor 3, St Jude Center', city: 'Bangalore', state: 'Karnataka', status: 'fulfilled', notes: 'Platelet count dropped below 20k. Fulfilled by Metro Blood Bank.', created_at: '2026-11-24T10:00:00' }
+  { id: 1, requester_id: 6, requester_name: 'Amit Sengupta (Demo Requester)', requester_role: 'requester', patient_name: 'Ramesh Sengupta (Post-Surgery)', hospital_name_manual: 'CityCare Multispecialty Hospital', blood_group: 'O+', component: 'Packed Red Blood Cells (PRBC)', units_needed: 2, units_fulfilled: 0, urgency: 'urgent', required_by: '2026-11-27T10:00:00', contact_phone: '+91-9876543215', delivery_address: 'Ward 4B, CityCare Hospital, Indiranagar', city: 'Bangalore', state: 'Karnataka', status: 'pending', notes: 'Patient scheduled for bypass surgery tomorrow morning.', created_at: '2026-11-25T14:00:00', donorInterests: [] },
+  { id: 2, requester_id: 3, requester_name: 'Dr. Arvind Verma', requester_role: 'hospital', patient_name: 'Trauma ICU Patient #1042', hospital_name_manual: 'CityCare Multispecialty Hospital', blood_group: 'O-', component: 'Whole Blood', units_needed: 3, units_fulfilled: 0, urgency: 'emergency', required_by: '2026-11-26T04:00:00', contact_phone: '+91-8023456780', delivery_address: 'ICU Resuscitation Bay 2', city: 'Bangalore', state: 'Karnataka', status: 'pending', notes: 'Critical road traffic accident trauma case. Immediate availability required.', created_at: '2026-11-25T20:30:00', donorInterests: [] },
+  { id: 3, requester_id: 6, requester_name: 'Amit Sengupta (Demo Requester)', requester_role: 'requester', patient_name: 'Sunita M. (Dengue Care)', hospital_name_manual: 'St. Jude Apex Medical Center', blood_group: 'B+', component: 'Platelets', units_needed: 4, units_fulfilled: 4, urgency: 'standard', required_by: '2026-11-24T18:00:00', contact_phone: '+91-9876543215', delivery_address: 'Floor 3, St Jude Center', city: 'Bangalore', state: 'Karnataka', status: 'completed', assigned_blood_bank_name: 'Metro Central Blood Bank', processing_stage: 'Completed and Dispatched', notes: 'Platelet count dropped below 20k. Fulfilled by Metro Blood Bank.', created_at: '2026-11-24T10:00:00', donorInterests: [] }
 ];
 
 let mockBatches = [
@@ -135,10 +135,81 @@ function handleMockRequest(endpoint, options = {}) {
     const id = parseInt(cleanPath.split('/')[2], 10);
     const reqItem = mockRequests.find(r => r.id === id);
     if (reqItem) {
-      reqItem.units_fulfilled = Math.min(reqItem.units_needed, reqItem.units_fulfilled + (body.units_to_deduct || 1));
-      if (reqItem.units_fulfilled >= reqItem.units_needed) reqItem.status = 'fulfilled';
+      reqItem.units_fulfilled = Math.min(reqItem.units_needed, (reqItem.units_fulfilled || 0) + (body.units_to_deduct || 1));
+      reqItem.status = 'completed';
+      reqItem.processing_stage = 'Units Issued and Completed';
     }
     return { success: true, message: 'Units issued and deducted.' };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/accept')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      reqItem.status = 'accepted';
+      reqItem.assigned_blood_bank_id = 1;
+      reqItem.assigned_blood_bank_name = 'Metro Central Blood Bank & Research Institute';
+      reqItem.processing_stage = 'Requisition Accepted';
+    }
+    return { success: true, message: 'Request accepted by blood bank.', data: reqItem };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/reject')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      reqItem.status = 'rejected';
+      reqItem.rejection_reason = body.reason || 'Inventory unavailable at blood bank.';
+    }
+    return { success: true, message: 'Request rejected.', data: reqItem };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/process')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      reqItem.status = 'processing';
+      reqItem.processing_stage = body.stage || 'Crossmatching & Unit Reservation';
+    }
+    return { success: true, message: 'Processing stage updated.', data: reqItem };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/dispatch')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      reqItem.status = 'dispatched';
+      reqItem.processing_stage = 'Dispatched via cold-chain courier';
+    }
+    return { success: true, message: 'Units dispatched.', data: reqItem };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/cancel')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      reqItem.status = 'cancelled';
+    }
+    return { success: true, message: 'Requisition cancelled.' };
+  }
+
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/donor-interest')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
+    const reqItem = mockRequests.find(r => r.id === id);
+    if (reqItem) {
+      if (!reqItem.donorInterests) reqItem.donorInterests = [];
+      reqItem.donorInterests.push({
+        id: Date.now(),
+        request_id: id,
+        donor_user_id: 4,
+        donor_name: 'Rajesh Kumar (Demo Donor)',
+        donor_blood_group: reqItem.blood_group,
+        notes: body.notes || 'Willing to donate',
+        status: 'pledged',
+        created_at: new Date().toISOString()
+      });
+    }
+    return { success: true, message: 'Donation willingness registered.' };
   }
 
   if (cleanPath.startsWith('/requests/')) {
@@ -266,6 +337,25 @@ function handleMockRequest(endpoint, options = {}) {
         phone: '+91-9876543210',
         role,
         roleDetails: { blood_group: 'O+', city: 'Bangalore', state: 'Karnataka', availability_status: 'available' }
+      }
+    };
+  }
+
+  if (cleanPath === '/bloodbanks/me') {
+    return {
+      success: true,
+      data: {
+        id: 1,
+        name: 'Metro Central Blood Bank & Research Institute',
+        license_number: 'BB-KA-2023-011',
+        address: '101 Victoria Road, Richmond Town',
+        city: 'Bangalore',
+        state: 'Karnataka',
+        pincode: '560025',
+        contact_phone: '+91-8022114400',
+        contact_email: 'inventory@metroblood.org',
+        operating_hours: '24/7 Service',
+        verification_status: 'verified'
       }
     };
   }

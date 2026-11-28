@@ -1,137 +1,203 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import http from 'http';
-import app from '../src/server.js';
-import pool from '../src/config/db.js';
 
-let server;
-let baseUrl;
+let baseUrl = process.env.BASE_URL || 'http://localhost:5000';
 
-before(async () => {
-    await new Promise((resolve) => {
-        server = http.createServer(app);
-        server.listen(5099, () => {
-            baseUrl = 'http://localhost:5099';
-            resolve();
-        });
+async function getToken(email, password) {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
     });
-});
+    const json = await res.json();
+    return json.data?.token;
+}
 
-after(async () => {
-    if (server) {
-        await new Promise((resolve) => server.close(resolve));
-    }
-    await pool.end();
-});
+describe('CELLS – Strict Role-Based Access Control (RBAC) & Workflow Test Suite', () => {
 
-describe('CELLS System Integration Tests', () => {
-
-    test('1. Health Check returns 200 OK and database status', async () => {
-        const res = await fetch(`${baseUrl}/api/health`);
-        const json = await res.json();
-        assert.strictEqual(res.status, 200);
-        assert.strictEqual(json.success, true);
-        assert.strictEqual(json.data.status, 'HEALTHY');
-    });
-
-    test('2. Authentication: Reject login with incorrect password', async () => {
-        const res = await fetch(`${baseUrl}/api/auth/login`, {
+    test('1. A Blood Bank user cannot create a blood request (HTTP 403)', async () => {
+        const token = await getToken('staff@metroblood.org', 'Bank@1234');
+        const res = await fetch(`${baseUrl}/api/requests`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: 'donor.rajesh@cells.sample',
-                password: 'WrongPassword999'
-            })
-        });
-        const json = await res.json();
-        assert.strictEqual(res.status, 401);
-        assert.strictEqual(json.success, false);
-    });
-
-    test('3. Authentication: Successful login returns JWT and user role', async () => {
-        const res = await fetch(`${baseUrl}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: 'staff@metroblood.org',
-                password: 'Bank@1234'
-            })
-        });
-        const json = await res.json();
-        assert.strictEqual(res.status, 200);
-        assert.strictEqual(json.success, true);
-        assert.ok(json.data.token);
-        assert.strictEqual(json.data.user.role, 'blood_bank');
-    });
-
-    test('4. RBAC Authorization: Donor cannot access Blood Bank inventory batches directly', async () => {
-        // Login as Donor
-        const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: 'donor.rajesh@cells.sample',
-                password: 'Donor@1234'
-            })
-        });
-        const loginJson = await loginRes.json();
-        const donorToken = loginJson.data.token;
-
-        // Attempt to access restricted blood bank inventory
-        const invRes = await fetch(`${baseUrl}/api/inventory`, {
-            headers: { 'Authorization': `Bearer ${donorToken}` }
-        });
-        const invJson = await invRes.json();
-        assert.strictEqual(invRes.status, 403);
-        assert.strictEqual(invJson.success, false);
-    });
-
-    test('5. Public Blood Bank Search returns verified banks and stock count', async () => {
-        const res = await fetch(`${baseUrl}/api/bloodbanks?city=Bangalore`);
-        const json = await res.json();
-        assert.strictEqual(res.status, 200);
-        assert.strictEqual(json.success, true);
-        assert.ok(Array.isArray(json.data.banks));
-        assert.ok(json.data.banks.length > 0);
-    });
-
-    test('6. Potential Donor Leads with Privacy Masking', async () => {
-        const res = await fetch(`${baseUrl}/api/donors?blood_group=O%2B`);
-        const json = await res.json();
-        assert.strictEqual(res.status, 200);
-        assert.strictEqual(json.success, true);
-        assert.ok(json.data.donors.length > 0);
-        // Verify privacy masking is active
-        const donor = json.data.donors[0];
-        assert.ok(donor.masked_name.includes('***'));
-    });
-
-    test('7. Inventory Transaction Safety: Prevent deduction from Quarantined batch', async () => {
-        // Login as Blood Bank Staff
-        const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: 'staff@metroblood.org',
-                password: 'Bank@1234'
-            })
-        });
-        const { data: { token } } = await loginRes.json();
-
-        // Batch 6 in seed data is quarantined ('MCBB-2026-A106')
-        const fulfillRes = await fetch(`${baseUrl}/api/requests/1/fulfill`, {
-            method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
-                batch_id: 6,
-                units_to_deduct: 1
+                patient_name: 'Illegal BloodBank Request',
+                blood_group: 'O+',
+                component: 'Whole Blood',
+                units_needed: 2,
+                urgency: 'urgent',
+                required_by: '2026-12-01T10:00:00',
+                contact_phone: '+91-9876543210',
+                delivery_address: 'Main St',
+                city: 'Bangalore'
             })
         });
-        const fulfillJson = await fulfillRes.json();
-        assert.strictEqual(fulfillRes.status, 400);
-        assert.match(fulfillJson.message, /quarantined/i);
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('2. A Hospital user cannot approve or reject a blood request (HTTP 403)', async () => {
+        const token = await getToken('doctor@citycare.org', 'Hosp@1234');
+        const res = await fetch(`${baseUrl}/api/requests/1/accept`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('3. A Doctor cannot modify inventory (HTTP 403)', async () => {
+        const token = await getToken('doctor@citycare.org', 'Hosp@1234');
+        const res = await fetch(`${baseUrl}/api/inventory/1`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ status: 'tested_safe' })
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('4. A Requestor cannot approve their own request (HTTP 403)', async () => {
+        const token = await getToken('requester.amit@cells.sample', 'Req@1234');
+        const res = await fetch(`${baseUrl}/api/requests/1/accept`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('5. A Donor cannot create a patient blood request (HTTP 403)', async () => {
+        const token = await getToken('donor.rajesh@cells.sample', 'Donor@1234');
+        const res = await fetch(`${baseUrl}/api/requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                patient_name: 'Donor Attempting Patient Request',
+                blood_group: 'O+',
+                units_needed: 1,
+                required_by: '2026-12-01T10:00:00',
+                contact_phone: '+91-9876543210',
+                delivery_address: 'City Center',
+                city: 'Bangalore'
+            })
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('6. A Donor cannot approve a blood-bank request (HTTP 403)', async () => {
+        const token = await getToken('donor.rajesh@cells.sample', 'Donor@1234');
+        const res = await fetch(`${baseUrl}/api/requests/1/accept`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+    });
+
+    test('7. A Blood Bank cannot modify another Blood Bank inventory (HTTP 403)', async () => {
+        // Metro Bank staff (bank_id: 1) attempts to modify batch #7 (belongs to Apollo Bank, bank_id: 2)
+        const token = await getToken('staff@metroblood.org', 'Bank@1234');
+        const res = await fetch(`${baseUrl}/api/inventory/7`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ status: 'tested_safe' })
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.match(json.message, /another blood bank/i);
+    });
+
+    test('8. A Hospital cannot access another Hospital private requests (HTTP 403)', async () => {
+        // St. Jude Doctor (hospital_id: 2) attempts to view request #2 (belongs to CityCare Hospital, hospital_id: 1)
+        const token = await getToken('doctor@stjude.org', 'Hosp@1234');
+        const res = await fetch(`${baseUrl}/api/requests/2`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.match(json.message, /another hospital/i);
+    });
+
+    test('9. A Requestor cannot access another Requestor private information (HTTP 403)', async () => {
+        // Register a second requester
+        const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                full_name: 'Sneha Requester',
+                email: `sneha.${Date.now()}@sample.org`,
+                password: 'Password@123',
+                phone: '+91-9988776655',
+                role: 'requester'
+            })
+        });
+        const { data: { token: snehaToken } } = await regRes.json();
+
+        // Sneha attempts to access private request #1 (created by requester Amit Sengupta, user_id: 6)
+        const res = await fetch(`${baseUrl}/api/requests/1`, {
+            headers: { 'Authorization': `Bearer ${snehaToken}` }
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.match(json.message, /another requestor/i);
+    });
+
+    test('10. An unauthenticated user cannot access protected APIs (HTTP 401)', async () => {
+        const res = await fetch(`${baseUrl}/api/inventory`);
+        assert.strictEqual(res.status, 401);
+    });
+
+    test('11. A Super Admin can verify organization accounts (HTTP 200)', async () => {
+        const token = await getToken('admin@cells.org', 'Admin@1234');
+        // Verify pending hospital #3
+        const res = await fetch(`${baseUrl}/api/admin/verifications/hospital/3`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ status: 'verified' })
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(json.success, true);
+    });
+
+    test('12. A normal user cannot assign themselves a Super Admin role (HTTP 403)', async () => {
+        const res = await fetch(`${baseUrl}/api/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                full_name: 'Hacker Admin Candidate',
+                email: `hacker.${Date.now()}@sample.org`,
+                password: 'Password@123',
+                phone: '+91-9999999999',
+                role: 'admin'
+            })
+        });
+        const json = await res.json();
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(json.success, false);
+        assert.match(json.message, /prohibited/i);
     });
 });

@@ -17,6 +17,10 @@ export const register = async (req, res) => {
         return errorResponse(res, 'Full name, email, password, and phone are required.', 400);
     }
 
+    if (role === 'admin') {
+        return errorResponse(res, 'Access denied. Self-registration as Super Administrator is strictly prohibited.', 403);
+    }
+
     const assignedRole = ['donor', 'requester', 'hospital', 'blood_bank', 'public_visitor'].includes(role) 
         ? role 
         : 'public_visitor';

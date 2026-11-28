@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { 
   Heart, Bell, User, LogOut, Shield, Activity, 
-  Search, Users, Hospital, Droplet, Menu, X, Check 
+  Search, Users, Hospital, Droplet, Menu, X, PlusCircle, Check 
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -12,7 +12,6 @@ export default function Navbar() {
   const { notifications, unreadCount, markAsRead, markAllRead } = useNotifications();
   const navigate = useNavigate();
   const [showNotifs, setShowNotifs] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getDashboardLink = () => {
     if (!user) return '/login';
@@ -30,13 +29,16 @@ export default function Navbar() {
     if (!user) return 'Portal';
     switch (user.role) {
       case 'donor': return 'Donor Portal';
-      case 'blood_bank': return 'Blood Bank Staff';
+      case 'blood_bank': return 'Blood Bank Console';
       case 'hospital': return 'Hospital Portal';
       case 'admin': return 'Super Admin';
       case 'requester': return 'My Requests';
       default: return 'Dashboard';
     }
   };
+
+  // RBAC: Blood Bank, Donor, and Admin CANNOT create requests!
+  const canCreateRequest = !user || user.role === 'hospital' || user.role === 'requester';
 
   return (
     <header className="navbar">
@@ -74,9 +76,11 @@ export default function Navbar() {
 
         {/* Action Buttons */}
         <div className="nav-actions">
-          <Link to="/emergency" className="btn btn-sm btn-danger-emergency">
-            Emergency Request
-          </Link>
+          {canCreateRequest && (
+            <Link to="/emergency" className="btn btn-sm btn-danger-emergency">
+              <PlusCircle size={14} /> {user?.role === 'hospital' ? 'Hospital Requisition' : 'Emergency Request'}
+            </Link>
+          )}
 
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', position: 'relative' }}>

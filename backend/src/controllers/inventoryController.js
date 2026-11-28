@@ -6,7 +6,7 @@ export const getInventoryBatches = async (req, res) => {
     try {
         let bankId = req.query.bank_id;
 
-        // If user is blood bank staff, default to their bank
+        // If user is blood bank staff, strictly scope to their own bank
         if (req.user && req.user.role === 'blood_bank') {
             const [staff] = await pool.query('SELECT blood_bank_id FROM blood_bank_staff WHERE user_id = ?', [req.user.id]);
             if (staff.length) {
@@ -48,6 +48,10 @@ export const getInventoryBatches = async (req, res) => {
 };
 
 export const createBatch = async (req, res) => {
+    if (req.user.role !== 'blood_bank' && req.user.role !== 'admin') {
+        return errorResponse(res, "Access denied. Only authorized Blood Bank personnel can add inventory stock.", 403);
+    }
+
     const { batch_number, blood_group, component, units_available, collection_date, expiry_date, status, storage_location } = req.body;
 
     if (!batch_number || !blood_group || !units_available || !collection_date || !expiry_date) {
@@ -64,8 +68,8 @@ export const createBatch = async (req, res) => {
 
         const [insertRes] = await pool.query(`
             INSERT INTO inventory_batches (
-                blood_bank_id, batch_number, blood_group, component, units_available, collection_date, expiry_date, status, storage_location
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                blood_bank_id, batch_number, blood_group, component, units_available, units_reserved, collection_date, expiry_date, status, storage_location
+            ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
         `, [
             bankId,
             batch_number,
@@ -99,6 +103,10 @@ export const createBatch = async (req, res) => {
 };
 
 export const updateBatchStatus = async (req, res) => {
+    if (req.user.role !== 'blood_bank' && req.user.role !== 'admin') {
+        return errorResponse(res, "Access denied. Only authorized Blood Bank personnel can update inventory status.", 403);
+    }
+
     const batchId = req.params.id;
     const { status, storage_location } = req.body;
 
@@ -107,6 +115,17 @@ export const updateBatchStatus = async (req, res) => {
     }
 
     try {
+        const [batchRows] = await pool.query('SELECT blood_bank_id FROM inventory_batches WHERE id = ?', [batchId]);
+        if (!batchRows.length) return errorResponse(res, 'Batch not found', 404);
+
+        // STRICT RBAC OWNERSHIP CHECK: A Blood Bank cannot modify another Blood Bank's inventory
+        if (req.user.role === 'blood_bank') {
+            const [staff] = await pool.query('SELECT blood_bank_id FROM blood_bank_staff WHERE user_id = ?', [req.user.id]);
+            if (!staff.length || staff[0].blood_bank_id !== batchRows[0].blood_bank_id) {
+                return errorResponse(res, "Access forbidden. A blood bank cannot modify another blood bank's inventory.", 403);
+            }
+        }
+
         await pool.query(`
             UPDATE inventory_batches
             SET status = ?, storage_location = COALESCE(?, storage_location)

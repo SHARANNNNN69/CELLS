@@ -93,11 +93,36 @@ export default function EmergencyRequestPage() {
       {!user && (
         <div className="card" style={{ background: '#f0f9ff', border: '1px solid #bae6fd', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '0.9rem', color: '#0369a1' }}>
-            <strong>Notice:</strong> You need an authenticated session to post a verifiable blood request and receive live response updates.
+            <strong>Notice:</strong> You need an authenticated Hospital or Requestor session to post a verifiable blood request.
           </div>
           <Link to="/login" className="btn btn-primary btn-sm">
             Sign In Now
           </Link>
+        </div>
+      )}
+
+      {user && user.role !== 'hospital' && user.role !== 'requester' && (
+        <div className="card" style={{ background: '#fffbeb', border: '2px solid #fde68a', marginBottom: '1.5rem', padding: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+            <AlertCircle size={24} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#92400e', margin: '0 0 0.35rem 0' }}>
+                Role Access Notice: {user.role === 'blood_bank' ? 'Blood Bank Account' : user.role === 'donor' ? 'Voluntary Donor Account' : 'Administrator'}
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: '#78350f', margin: '0 0 0.75rem 0', lineHeight: 1.5 }}>
+                Under CELLS Clinical Governance & Role-Based Access Control, <strong>{user.role}</strong> accounts cannot initiate blood requisitions.
+                Blood requisitions can only be submitted by verified <strong>Hospital / Doctor</strong> accounts or <strong>Patient / Requestor</strong> accounts.
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <Link to={user.role === 'blood_bank' ? '/bloodbank-dashboard' : user.role === 'donor' ? '/donor-dashboard' : '/admin-dashboard'} className="btn btn-primary btn-sm">
+                  Go to {user.role === 'blood_bank' ? 'Blood Bank Dashboard' : user.role === 'donor' ? 'Donor Portal' : 'Admin Portal'}
+                </Link>
+                <Link to="/requests" className="btn btn-outline btn-sm">
+                  Browse Active Requests
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -326,11 +351,23 @@ export default function EmergencyRequestPage() {
 
           <button 
             type="submit" 
-            disabled={loading}
+            disabled={loading || (user && user.role !== 'hospital' && user.role !== 'requester')}
             className="btn btn-primary"
-            style={{ width: '100%', padding: '0.8rem', fontSize: '1rem', marginTop: '1rem' }}
+            style={{ 
+              width: '100%', 
+              padding: '0.8rem', 
+              fontSize: '1rem', 
+              marginTop: '1rem',
+              opacity: (user && user.role !== 'hospital' && user.role !== 'requester') ? 0.6 : 1,
+              cursor: (user && user.role !== 'hospital' && user.role !== 'requester') ? 'not-allowed' : 'pointer'
+            }}
           >
-            {loading ? 'Submitting & Dispatching Notifications...' : 'Publish Blood Requisition'}
+            {user && user.role !== 'hospital' && user.role !== 'requester' 
+              ? `Action Restricted (${user.role} cannot create requests)` 
+              : loading 
+                ? 'Submitting & Dispatching Notifications...' 
+                : 'Publish Blood Requisition'
+            }
           </button>
         </form>
       </div>

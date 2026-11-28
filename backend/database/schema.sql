@@ -1,7 +1,8 @@
 -- CELLS Database Schema
--- Blood Donation & Emergency Management Network
+-- Blood Donation & Emergency Management Network (Strict RBAC & Operational Workflows)
 
-CREATE DATABASE IF NOT EXISTS cells_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+DROP DATABASE IF EXISTS cells_db;
+CREATE DATABASE cells_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE cells_db;
 
 -- 1. Users table (Central authentication & core role)
@@ -102,10 +103,11 @@ CREATE TABLE IF NOT EXISTS blood_bank_staff (
     CONSTRAINT fk_bbstaff_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 7. Blood Requests (Emergency and Standard Requests)
+-- 7. Blood Requests (Created strictly by Hospitals/Doctors or Requesters)
 CREATE TABLE IF NOT EXISTS blood_requests (
     id INT AUTO_INCREMENT PRIMARY KEY,
     requester_id INT NOT NULL,
+    requester_role ENUM('hospital', 'requester') NOT NULL,
     patient_name VARCHAR(120) NOT NULL,
     hospital_id INT NULL,
     hospital_name_manual VARCHAR(180) NULL,
@@ -119,32 +121,35 @@ CREATE TABLE IF NOT EXISTS blood_requests (
     delivery_address TEXT NOT NULL,
     city VARCHAR(80) NOT NULL,
     state VARCHAR(80) NOT NULL,
-    status ENUM('open', 'partially_fulfilled', 'fulfilled', 'cancelled', 'expired') NOT NULL DEFAULT 'open',
+    status ENUM('pending', 'accepted', 'rejected', 'processing', 'dispatched', 'completed', 'cancelled') NOT NULL DEFAULT 'pending',
+    assigned_blood_bank_id INT NULL,
+    rejection_reason TEXT NULL,
+    processing_stage ENUM('none', 'stock_reserved', 'crossmatch_verified', 'dispatched', 'completed') NOT NULL DEFAULT 'none',
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_request_user FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_request_hospital FOREIGN KEY (hospital_id) REFERENCES hospitals(id) ON DELETE SET NULL,
+    CONSTRAINT fk_request_assigned_bank FOREIGN KEY (assigned_blood_bank_id) REFERENCES blood_banks(id) ON DELETE SET NULL,
     INDEX idx_req_blood_group (blood_group),
     INDEX idx_req_city (city),
     INDEX idx_req_status (status),
     INDEX idx_req_urgency (urgency)
 ) ENGINE=InnoDB;
 
--- 8. Request Responses (from Blood Banks or Voluntary Donors)
-CREATE TABLE IF NOT EXISTS request_responses (
+-- 8. Donor Willingness Expressions (Separate Donor Workflow)
+CREATE TABLE IF NOT EXISTS donor_interests (
     id INT AUTO_INCREMENT PRIMARY KEY,
     request_id INT NOT NULL,
-    responder_type ENUM('blood_bank', 'donor') NOT NULL,
-    responder_id INT NOT NULL, -- references blood_banks(id) or users(id)
-    responder_name VARCHAR(180) NOT NULL,
-    units_offered INT NOT NULL DEFAULT 1,
-    status ENUM('offered', 'accepted', 'declined', 'completed') NOT NULL DEFAULT 'offered',
-    message TEXT NULL,
+    donor_user_id INT NOT NULL,
+    availability_note VARCHAR(255) NULL,
+    status ENUM('expressed', 'contacted', 'screened', 'donated', 'declined') NOT NULL DEFAULT 'expressed',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_resp_request FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
-    INDEX idx_resp_request (request_id)
+    CONSTRAINT fk_interest_request FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_interest_donor FOREIGN KEY (donor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_interest_req (request_id),
+    INDEX idx_interest_donor (donor_user_id)
 ) ENGINE=InnoDB;
 
 -- 9. Inventory Batches (Blood Bank Stocks)
@@ -155,6 +160,7 @@ CREATE TABLE IF NOT EXISTS inventory_batches (
     blood_group ENUM('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') NOT NULL,
     component ENUM('Whole Blood', 'Packed Red Blood Cells (PRBC)', 'Platelets', 'Fresh Frozen Plasma (FFP)', 'Cryoprecipitate') NOT NULL DEFAULT 'Whole Blood',
     units_available INT NOT NULL DEFAULT 0 CHECK (units_available >= 0),
+    units_reserved INT NOT NULL DEFAULT 0 CHECK (units_reserved >= 0),
     collection_date DATE NOT NULL,
     expiry_date DATE NOT NULL,
     status ENUM('quarantined', 'tested_safe', 'rejected', 'expired', 'depleted') NOT NULL DEFAULT 'quarantined',
@@ -185,7 +191,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
     INDEX idx_trans_batch (batch_id)
 ) ENGINE=InnoDB;
 
--- 11. Voluntary Donations
+-- 11. Verified Voluntary Donations (Recorded strictly by authorized Blood Bank personnel)
 CREATE TABLE IF NOT EXISTS donations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     donor_user_id INT NOT NULL,
@@ -194,10 +200,12 @@ CREATE TABLE IF NOT EXISTS donations (
     blood_group ENUM('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') NOT NULL,
     units_donated INT NOT NULL DEFAULT 1,
     screening_passed BOOLEAN NOT NULL DEFAULT TRUE,
+    recorded_by_user_id INT NOT NULL,
     notes VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_don_user FOREIGN KEY (donor_user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_don_bank FOREIGN KEY (blood_bank_id) REFERENCES blood_banks(id) ON DELETE CASCADE,
+    CONSTRAINT fk_don_staff FOREIGN KEY (recorded_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_don_donor (donor_user_id)
 ) ENGINE=InnoDB;
 

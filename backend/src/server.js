@@ -78,12 +78,14 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, async () => {
-    console.log(`=========================================`);
-    console.log(` CELLS API Server listening on port ${PORT}`);
-    console.log(` Health check: http://localhost:${PORT}/api/health`);
-    console.log(`=========================================`);
-    await testConnection();
-});
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, async () => {
+        console.log(`=========================================`);
+        console.log(` CELLS API Server listening on port ${PORT}`);
+        console.log(` Health check: http://localhost:${PORT}/api/health`);
+        console.log(`=========================================`);
+        await testConnection();
+    });
+}
 
 export default app;
