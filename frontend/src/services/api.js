@@ -60,16 +60,18 @@ export const apiRequest = async (endpoint, options = {}) => {
 };
 
 function handleMockRequest(endpoint, options = {}) {
-  const url = new URL(`http://dummy${endpoint}`);
-  const pathname = url.pathname;
+  const url = new URL(`http://dummy${endpoint.startsWith('/') ? '' : '/'}${endpoint}`);
+  let pathname = url.pathname;
+  // Normalize pathname: ensure it has standard path without /api prefix
+  const cleanPath = pathname.startsWith('/api') ? pathname.slice(4) : pathname;
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body ? JSON.parse(options.body) : {};
 
-  if (pathname === '/api/health') {
+  if (cleanPath === '/health') {
     return { success: true, data: { status: 'HEALTHY (Demo Mode)', service: 'CELLS Network', uptimeSeconds: 3600 } };
   }
 
-  if (pathname === '/api/analytics/dashboard') {
+  if (cleanPath === '/analytics/dashboard') {
     return {
       success: true,
       data: {
@@ -98,25 +100,25 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/bloodbanks') {
+  if (cleanPath === '/bloodbanks') {
     let list = [...mockBanks];
     const city = url.searchParams.get('city');
     if (city) list = list.filter(b => b.city.toLowerCase().includes(city.toLowerCase()));
     return { success: true, data: { banks: list } };
   }
 
-  if (pathname === '/api/donors') {
+  if (cleanPath === '/donors') {
     let list = [...mockDonors];
     const bg = url.searchParams.get('blood_group');
     if (bg) list = list.filter(d => d.blood_group === bg);
     return { success: true, data: { donors: list } };
   }
 
-  if (pathname === '/api/requests' && method === 'GET') {
+  if (cleanPath === '/requests' && method === 'GET') {
     return { success: true, data: mockRequests };
   }
 
-  if (pathname === '/api/requests' && method === 'POST') {
+  if (cleanPath === '/requests' && method === 'POST') {
     const newReq = {
       id: mockRequests.length + 1,
       requester_name: 'Demo Requester',
@@ -129,8 +131,8 @@ function handleMockRequest(endpoint, options = {}) {
     return { success: true, data: newReq };
   }
 
-  if (pathname.startsWith('/api/requests/') && pathname.endsWith('/fulfill')) {
-    const id = parseInt(pathname.split('/')[3], 10);
+  if (cleanPath.startsWith('/requests/') && cleanPath.endsWith('/fulfill')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
     const reqItem = mockRequests.find(r => r.id === id);
     if (reqItem) {
       reqItem.units_fulfilled = Math.min(reqItem.units_needed, reqItem.units_fulfilled + (body.units_to_deduct || 1));
@@ -139,8 +141,8 @@ function handleMockRequest(endpoint, options = {}) {
     return { success: true, message: 'Units issued and deducted.' };
   }
 
-  if (pathname.startsWith('/api/requests/')) {
-    const id = parseInt(pathname.split('/')[3], 10);
+  if (cleanPath.startsWith('/requests/')) {
+    const id = parseInt(cleanPath.split('/')[2], 10);
     const reqItem = mockRequests.find(r => r.id === id) || mockRequests[0];
     return {
       success: true,
@@ -153,11 +155,11 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/inventory' && method === 'GET') {
+  if (cleanPath === '/inventory' && method === 'GET') {
     return { success: true, data: mockBatches };
   }
 
-  if (pathname === '/api/inventory' && method === 'POST') {
+  if (cleanPath === '/inventory' && method === 'POST') {
     const newBatch = {
       id: mockBatches.length + 1,
       blood_bank_id: 1,
@@ -169,14 +171,14 @@ function handleMockRequest(endpoint, options = {}) {
     return { success: true, data: newBatch };
   }
 
-  if (pathname.startsWith('/api/inventory/') && method === 'PATCH') {
-    const id = parseInt(pathname.split('/')[3], 10);
+  if (cleanPath.startsWith('/inventory/') && method === 'PATCH') {
+    const id = parseInt(cleanPath.split('/')[2], 10);
     const b = mockBatches.find(x => x.id === id);
     if (b && body.status) b.status = body.status;
     return { success: true, message: 'Status updated' };
   }
 
-  if (pathname === '/api/inventory/audit-logs') {
+  if (cleanPath === '/inventory/audit-logs') {
     return {
       success: true,
       data: [
@@ -186,28 +188,74 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/auth/login') {
-    const email = body.email || 'demo@cells.org';
+  if (cleanPath === '/auth/login') {
+    const email = (body.email || '').toLowerCase().trim();
     let role = 'public_visitor';
     let name = 'Demo User';
-    if (email.includes('admin')) { role = 'admin'; name = 'System Administrator'; }
-    else if (email.includes('staff')) { role = 'blood_bank'; name = 'Dr. Sarah Mathews'; }
-    else if (email.includes('doctor')) { role = 'hospital'; name = 'Dr. Arvind Verma'; }
-    else if (email.includes('donor')) { role = 'donor'; name = 'Rajesh Kumar'; }
-    else if (email.includes('requester')) { role = 'requester'; name = 'Amit Sengupta'; }
+    
+    if (email.includes('admin')) { 
+      role = 'admin'; 
+      name = 'System Administrator'; 
+    } else if (email.includes('staff') || email.includes('metroblood') || email.includes('bank')) { 
+      role = 'blood_bank'; 
+      name = 'Dr. Sarah Mathews (Metro Bank)'; 
+    } else if (email.includes('doctor') || email.includes('citycare') || email.includes('hosp')) { 
+      role = 'hospital'; 
+      name = 'Dr. Arvind Verma (CityCare)'; 
+    } else if (email.includes('donor') || email.includes('rajesh') || email.includes('priya')) { 
+      role = 'donor'; 
+      name = email.includes('priya') ? 'Priya Sharma (Demo Donor)' : 'Rajesh Kumar (Demo Donor)'; 
+    } else if (email.includes('requester') || email.includes('amit')) { 
+      role = 'requester'; 
+      name = 'Amit Sengupta (Demo Requester)'; 
+    } else if (email.includes('visit') || email.includes('visitor')) { 
+      role = 'public_visitor'; 
+      name = 'Kavita Nair (Demo Visitor)'; 
+    } else {
+      // Any other custom email -> default to donor
+      role = 'donor';
+      name = email.split('@')[0] || 'Demo Donor';
+    }
 
-    const user = { id: 1, full_name: name, email, role, phone: '+91-9876543210' };
-    return { success: true, data: { token: 'demo-token-' + role, user } };
+    const user = { 
+      id: 1, 
+      full_name: name, 
+      email: body.email, 
+      role, 
+      phone: '+91-9876543210' 
+    };
+    return { 
+      success: true, 
+      message: 'Login successful', 
+      data: { token: 'demo-token-' + role, user } 
+    };
   }
 
-  if (pathname === '/api/auth/me') {
+  if (cleanPath === '/auth/register') {
+    const role = body.role || 'donor';
+    const user = {
+      id: Date.now(),
+      full_name: body.full_name || 'New Member',
+      email: body.email || 'user@cells.org',
+      role,
+      phone: body.phone || '+91-9876543210'
+    };
+    return {
+      success: true,
+      message: 'Registration successful',
+      data: { token: 'demo-token-' + role, user }
+    };
+  }
+
+  if (cleanPath === '/auth/me') {
     const token = localStorage.getItem('cells_token') || 'demo-token-donor';
     let role = 'donor';
-    let name = 'Rajesh Kumar';
+    let name = 'Rajesh Kumar (Demo Donor)';
     if (token.includes('admin')) { role = 'admin'; name = 'System Administrator'; }
-    else if (token.includes('blood_bank')) { role = 'blood_bank'; name = 'Dr. Sarah Mathews'; }
-    else if (token.includes('hospital')) { role = 'hospital'; name = 'Dr. Arvind Verma'; }
-    else if (token.includes('requester')) { role = 'requester'; name = 'Amit Sengupta'; }
+    else if (token.includes('blood_bank')) { role = 'blood_bank'; name = 'Dr. Sarah Mathews (Metro Bank)'; }
+    else if (token.includes('hospital')) { role = 'hospital'; name = 'Dr. Arvind Verma (CityCare)'; }
+    else if (token.includes('requester')) { role = 'requester'; name = 'Amit Sengupta (Demo Requester)'; }
+    else if (token.includes('visitor') || token.includes('public_visitor')) { role = 'public_visitor'; name = 'Kavita Nair (Demo Visitor)'; }
 
     return {
       success: true,
@@ -222,14 +270,29 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/donors/me') {
+  if (cleanPath === '/hospitals/me') {
+    return {
+      success: true,
+      data: {
+        id: 1,
+        name: 'CityCare Multispecialty Hospital',
+        license_number: 'HOSP-KA-2024-0042',
+        city: 'Bangalore',
+        state: 'Karnataka',
+        designation: 'Head of Emergency Services',
+        verification_status: 'verified'
+      }
+    };
+  }
+
+  if (cleanPath === '/donors/me') {
     return {
       success: true,
       data: { id: 1, blood_group: 'O+', city: 'Bangalore', state: 'Karnataka', pincode: '560001', availability_status: 'available', contact_preference: 'in_app', last_donation_date: '2026-08-10', notes: 'Universal donor.' }
     };
   }
 
-  if (pathname === '/api/donors/history') {
+  if (cleanPath === '/donors/history') {
     return {
       success: true,
       data: [
@@ -238,11 +301,11 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/admin/metrics') {
+  if (cleanPath === '/admin/metrics') {
     return { success: true, data: { users: 8, verifiedBanks: 3, verifiedHospitals: 2, totalRequests: mockRequests.length, openRequests: 2, availableTestedUnits: 65 } };
   }
 
-  if (pathname === '/api/admin/users') {
+  if (cleanPath === '/admin/users') {
     return {
       success: true,
       data: [
@@ -254,7 +317,7 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/admin/verifications') {
+  if (cleanPath === '/admin/verifications') {
     return {
       success: true,
       data: {
@@ -264,7 +327,7 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/admin/audit-logs') {
+  if (cleanPath === '/admin/audit-logs') {
     return {
       success: true,
       data: [
@@ -273,7 +336,7 @@ function handleMockRequest(endpoint, options = {}) {
     };
   }
 
-  if (pathname === '/api/notifications') {
+  if (cleanPath === '/notifications') {
     return {
       success: true,
       data: [
